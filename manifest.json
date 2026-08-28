@@ -1,0 +1,21 @@
+{
+  "manifest_version": 2,
+  "name": "PeelScout",
+  "description": "Removes the first email-security URL wrapper from links in the opened message and surfaces calendar-invite URLs.",
+  "version": "1.5.0",
+  "author": "ExploitBlock",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "peelscout@exploitblock.local",
+      "strict_min_version": "128.0"
+    }
+  },
+  "permissions": ["messagesRead", "messagesModify", "menus"],
+  "background": {
+    "scripts": ["ics.js", "background.js"]
+  },
+  "message_display_action": {
+    "default_title": "PeelScout",
+    "default_popup": "popup.html"
+  }
+}

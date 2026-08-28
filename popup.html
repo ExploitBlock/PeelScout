@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>PeelScout</title>
+  <style>
+    body { font: 13px/1.4 sans-serif; margin: 12px; width: 380px; color: #1c2430; }
+    label { font-weight: 700; display: block; margin-bottom: 4px; }
+    textarea { width: 100%; height: 72px; font: 11px monospace; }
+    pre { white-space: pre-wrap; word-break: break-all; background: #f4f1ea; padding: 8px; min-height: 3em; }
+    button { margin-top: 6px; }
+    .meta { color: #5c6774; font-size: 12px; margin: 6px 0; }
+  </style>
+</head>
+<body>
+  <label for="src">Paste wrapped URL</label>
+  <textarea id="src" placeholder="https://nam10.safelinks.protection.outlook.com/?url=..."></textarea>
+  <button id="go" type="button">Unwrap once</button>
+  <p class="meta" id="meta">Open a message: wrappers on links are removed automatically.</p>
+  <pre id="out">—</pre>
+  <button id="copy" type="button">Copy result</button>
+  <script src="inflate-zlib.js"></script>
+  <script src="unwrap.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

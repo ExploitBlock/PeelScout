@@ -9,6 +9,7 @@ async function injectIntoOpenTabs() {
       }
       await messenger.tabs.executeScript(tab.id, { file: "inflate-zlib.js" });
       await messenger.tabs.executeScript(tab.id, { file: "unwrap.js" });
+      await messenger.tabs.executeScript(tab.id, { file: "jsqr.min.js" });
       await messenger.tabs.executeScript(tab.id, { file: "message-script.js" });
       await messenger.tabs.insertCSS(tab.id, { file: "message-style.css" });
     } catch (_) {}
@@ -16,7 +17,12 @@ async function injectIntoOpenTabs() {
 }
 
 messenger.messageDisplayScripts.register({
-  js: [{ file: "inflate-zlib.js" }, { file: "unwrap.js" }, { file: "message-script.js" }],
+  js: [
+    { file: "inflate-zlib.js" },
+    { file: "unwrap.js" },
+    { file: "jsqr.min.js" },
+    { file: "message-script.js" },
+  ],
   css: [{ file: "message-style.css" }],
 });
 
@@ -67,6 +73,18 @@ function walkParts(part, acc) {
   }
 }
 
+async function sendWithRetry(tabId, payload) {
+  try {
+    await messenger.tabs.sendMessage(tabId, payload);
+  } catch (_) {
+    setTimeout(async () => {
+      try {
+        await messenger.tabs.sendMessage(tabId, payload);
+      } catch (_) {}
+    }, 400);
+  }
+}
+
 async function collectIcsUrls(messageId) {
   const urls = [];
   const seen = Object.create(null);
@@ -104,23 +122,48 @@ async function collectIcsUrls(messageId) {
   return urls;
 }
 
-async function pushIcsToTab(tabId, messageId) {
-  const urls = await collectIcsUrls(messageId);
-  try {
-    await messenger.tabs.sendMessage(tabId, { type: "ics-links", urls: urls });
-  } catch (_) {
-    setTimeout(async () => {
-      try {
-        await messenger.tabs.sendMessage(tabId, { type: "ics-links", urls: urls });
-      } catch (_) {}
-    }, 400);
+async function collectNested(messageId) {
+  const list = [];
+  const seen = Object.create(null);
+  async function addFile(partName, name, contentType) {
+    if (!partName || seen[partName]) return;
+    if (!NestedEml.isRfc822(name, contentType)) return;
+    seen[partName] = true;
+    try {
+      const file = await messenger.messages.getAttachmentFile(messageId, partName);
+      const raw = await NestedEml.fileToRaw(file);
+      const parsed = NestedEml.parse(raw, name || "message.eml");
+      for (const msg of parsed) list.push(msg);
+    } catch (_) {}
   }
+  try {
+    const atts = await messenger.messages.listAttachments(messageId);
+    for (const att of atts) {
+      await addFile(att.partName, att.name, att.contentType);
+    }
+  } catch (_) {}
+  try {
+    const full = await messenger.messages.getFull(messageId);
+    const parts = [];
+    walkParts(full, parts);
+    for (const part of parts) {
+      await addFile(part.partName, part.name || part.filename, part.contentType);
+    }
+  } catch (_) {}
+  return list.slice(0, 5);
+}
+
+async function pushExtrasToTab(tabId, messageId) {
+  const nested = await collectNested(messageId);
+  await sendWithRetry(tabId, { type: "nested-eml", messages: nested });
+  const urls = await collectIcsUrls(messageId);
+  await sendWithRetry(tabId, { type: "ics-links", urls: urls });
 }
 
 if (messenger.messageDisplay && messenger.messageDisplay.onMessageDisplayed) {
   messenger.messageDisplay.onMessageDisplayed.addListener(async (tab, message) => {
     if (!tab || !message) return;
-    await pushIcsToTab(tab.id, message.id);
+    await pushExtrasToTab(tab.id, message.id);
   });
 }
 

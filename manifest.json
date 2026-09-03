@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "PeelScout",
-  "description": "Removes the first email-security URL wrapper from links in the opened message and surfaces calendar-invite URLs.",
-  "version": "1.5.0",
+  "description": "Removes the first email-security URL wrapper, shows nested EML content and QR URLs, and surfaces calendar-invite URLs.",
+  "version": "1.6.0",
   "author": "ExploitBlock",
   "browser_specific_settings": {
     "gecko": {
@@ -12,7 +12,7 @@
   },
   "permissions": ["messagesRead", "messagesModify", "menus"],
   "background": {
-    "scripts": ["ics.js", "background.js"]
+    "scripts": ["ics.js", "nested.js", "background.js"]
   },
   "message_display_action": {
     "default_title": "PeelScout",

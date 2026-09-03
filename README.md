@@ -1,10 +1,10 @@
 # PeelScout
 
-Thunderbird add-on that removes the **first** email-security URL wrapper when you open a message, and shows URLs hidden in calendar invites (`.ics`).
+Thunderbird add-on that removes the **first** email-security URL wrapper when you open a message, shows nested `.eml` content (and QR URLs), and lists URLs hidden in calendar invites (`.ics`).
 
 A normal click uses the inner URL. The stored `.eml` is not changed. PeelScout does not need internet to run.
 
-Not in this version: nested EML / QR body display.
+Not in this version: QR inside PDF attachments. Translator is not included.
 
 ## Install in Thunderbird
 
@@ -29,6 +29,8 @@ Requires Thunderbird 128+.
 - Peels one wrapper on every `https` link in the displayed message
 - Keeps inner `%2` / `%25` encoding so nested redirects still work
 - Right-click a peeled link: show original wrapper, copy it, or keep unwrapping
+- If the message contains another `.eml` (`message/rfc822`), the inner subject, body, and images are shown automatically
+- QR codes in that inner (and outer) HTML are decoded; the URL is listed **raw** (not peeled)
 - If the message has `invite.ics` / `text/calendar`, a banner lists those URLs (AWS/S3 rows highlighted)
 
 ## Vendors

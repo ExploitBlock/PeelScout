@@ -1,12 +1,45 @@
 a.wrapper-unwrapped { text-decoration-style: dotted; }
-#wrapper-ics-banner {
+#wrapper-ics-banner,
+#wrapper-qr-banner {
   font: 13px/1.4 sans-serif; background: #fff6d8; color: #1c2430;
   border: 1px solid #e0c36a; border-radius: 6px; padding: 10px 12px; margin: 0 0 12px;
 }
-#wrapper-ics-banner .ics-title { font-weight: 700; margin-bottom: 6px; }
+#wrapper-ics-banner .ics-title,
+#wrapper-qr-banner .ics-title { font-weight: 700; margin-bottom: 6px; }
 #wrapper-ics-banner .ics-row { margin: 8px 0 0; word-break: break-all; }
 #wrapper-ics-banner .ics-meta { color: #5c6774; font-size: 12px; }
 #wrapper-ics-banner .ics-aws { background: #fde8e8; padding: 6px; border-radius: 4px; }
+#wrapper-nested-eml {
+  font: 13px/1.45 sans-serif; color: #1c2430; margin: 0 0 12px;
+}
+#wrapper-nested-eml .nest-block {
+  background: #e8f4ec; border: 1px solid #8fbf9a; border-radius: 6px;
+  padding: 10px 12px; margin: 0 0 10px;
+}
+#wrapper-nested-eml .nest-title { font-weight: 700; color: #0f6b4c; }
+#wrapper-nested-eml .nest-who { color: #5c6774; font-size: 12px; margin: 2px 0 8px; }
+#wrapper-nested-eml .nest-inner {
+  background: #fffcf7; border: 1px dashed #8fbf9a; border-radius: 6px; padding: 8px;
+}
+#wrapper-nested-eml .nest-frame {
+  width: 100%; min-height: 160px; border: 0; background: #fff; border-radius: 4px;
+}
+#wrapper-nested-eml .nest-media { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+#wrapper-nested-eml .nest-img {
+  max-width: 148px; max-height: 148px; border: 1px solid #1c2430; background: #fff;
+}
+#wrapper-nested-eml .nest-qr-box,
+#wrapper-qr-banner .nest-qr {
+  margin-top: 8px;
+}
+#wrapper-nested-eml .nest-qr,
+#wrapper-qr-banner .nest-qr {
+  background: #f8dcdc; border: 1px solid #d9a0a0; border-radius: 4px; padding: 8px 10px;
+  word-break: break-all;
+}
+#wrapper-nested-eml .nest-qr-lbl,
+#wrapper-qr-banner .nest-qr-lbl { font-size: 12px; color: #5c6774; margin-bottom: 4px; }
+#wrapper-nested-eml a, #wrapper-qr-banner a { color: #0b57d0; }
 #wrapper-unwrap-panel {
   position: fixed; inset: 0; z-index: 2147483646; background: rgba(16, 22, 30, 0.45);
   display: flex; align-items: flex-start; justify-content: center; padding: 24px 16px;

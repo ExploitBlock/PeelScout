@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "PeelScout",
-  "description": "Removes the first email-security URL wrapper, shows nested EML content and QR URLs, and surfaces calendar-invite URLs.",
-  "version": "1.6.0",
+  "description": "Removes the first email-security URL wrapper, shows nested EML content and QR URLs, extracts phone numbers from nested-EML images, and surfaces calendar-invite URLs.",
+  "version": "1.7.0",
   "author": "ExploitBlock",
   "browser_specific_settings": {
     "gecko": {

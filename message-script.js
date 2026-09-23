@@ -321,11 +321,16 @@
     return true;
   }
 
-  async function fillQr(box, images) {
+  async function fillQr(box, images, imgByUrl) {
     for (const im of images || []) {
       if (!im.dataUrl) continue;
       const data = await decodeQr(im.dataUrl);
-      if (!data || !takeQr(data)) continue;
+      if (!data) continue;
+      if (imgByUrl && imgByUrl[im.dataUrl]) {
+        imgByUrl[im.dataUrl].classList.remove("nest-img-photo");
+        imgByUrl[im.dataUrl].classList.add("nest-img-qr");
+      }
+      if (!takeQr(data)) continue;
       box.appendChild(qrRow(data));
     }
   }
@@ -333,6 +338,41 @@
   function htmlToText(html) {
     const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
     return (doc.body && doc.body.textContent) || "";
+  }
+
+  function thinText(s) {
+    return String(s || "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;|&#160;/gi, " ")
+      .replace(/[\u00a0\r\n\t]+/g, " ")
+      .replace(/[-_=.*~]{3,}/g, " ")
+      .replace(/\\r\\n/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function hasMeaningfulBody(msg) {
+    const t = thinText(msg.text) + " " + thinText(htmlToText(msg.html));
+    const compact = t.replace(/\s+/g, " ").trim();
+    if (compact.length < 16) return false;
+    if (/^(confiance|confidential|disclaimer)(\s|$)/i.test(compact) && compact.length < 40) return false;
+    return true;
+  }
+
+  function showZoom(src) {
+    closePanel();
+    if (!src) return;
+    const panel = document.createElement("div");
+    panel.id = "wrapper-unwrap-panel";
+    panel.className = "wup-zoom";
+    panel.innerHTML =
+      '<div class="wup-zoom-card"><img alt="Nested image"><div class="wup-actions"><button type="button" id="wup-close">Close</button></div></div>';
+    panel.querySelector("img").src = src;
+    document.documentElement.appendChild(panel);
+    panel.querySelector("#wup-close").addEventListener("click", closePanel);
+    panel.addEventListener("click", function (e) {
+      if (e.target === panel) closePanel();
+    });
   }
 
   function phoneRow(num, source) {
@@ -405,8 +445,8 @@
         " · From: " +
         (msg.from || "(unknown)");
       const inner = document.createElement("div");
-      inner.className = "nest-inner";
-      const hasBody = !!(msg.html || msg.text);
+      const hasBody = hasMeaningfulBody(msg);
+      inner.className = "nest-inner" + (hasBody ? "" : " nest-tight");
       if (hasBody) {
         const body = document.createElement("iframe");
         body.className = "nest-frame";
@@ -421,23 +461,29 @@
         }
         body.addEventListener("load", function () {
           try {
-            if (body.contentDocument) rewriteAnchors(body.contentDocument);
+            if (body.contentDocument) {
+              rewriteAnchors(body.contentDocument);
+              const h = Math.min(420, Math.max(40, body.contentDocument.documentElement.scrollHeight || 0));
+              body.style.height = h + "px";
+            }
           } catch (_) {}
         });
         inner.appendChild(body);
       }
       const media = document.createElement("div");
       media.className = "nest-media" + (hasBody ? "" : " nest-img-only");
+      const imgByUrl = Object.create(null);
       for (const im of msg.images || []) {
         if (!im.dataUrl) continue;
         const img = document.createElement("img");
         img.src = im.dataUrl;
         img.alt = im.name || "Inner image";
-        img.className = "nest-img";
+        img.className = "nest-img nest-img-photo";
         img.addEventListener("click", function () {
-          window.open(im.dataUrl, "_blank", "noopener,noreferrer");
+          showZoom(im.dataUrl);
         });
         media.appendChild(img);
+        imgByUrl[im.dataUrl] = img;
       }
       if (media.childElementCount) inner.appendChild(media);
       const qrBox = document.createElement("div");
@@ -445,7 +491,7 @@
       const phoneBox = document.createElement("div");
       phoneBox.className = "nest-phone-box";
       pending.push(
-        fillQr(qrBox, msg.images).then(function () {
+        fillQr(qrBox, msg.images, imgByUrl).then(function () {
           if (qrBox.childElementCount) inner.appendChild(qrBox);
         })
       );

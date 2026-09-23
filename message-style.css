@@ -32,7 +32,7 @@ a.wrapper-unwrapped { text-decoration-style: dotted; }
   border: 1px solid #1c2430; background: #fff; cursor: zoom-in; height: auto;
 }
 #wrapper-nested-eml .nest-img-photo {
-  max-width: min(960px, 100%); width: min(960px, 100%); max-height: none;
+  max-width: min(560px, 100%); width: auto; max-height: 360px; object-fit: contain;
 }
 #wrapper-nested-eml .nest-img-qr {
   max-width: 168px; max-height: 168px; width: auto;

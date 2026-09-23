@@ -24,16 +24,6 @@ Debug Add-ons → **Load Temporary Add-on…** → `manifest.json` from a source
 
 Requires Thunderbird 128+.
 
-## 1.7.1
-
-- Nested subject sits on the photo when the inner mail has no real body text (no blank frame)
-- Photos display large; QR graphics stay small (~168px)
-- Click a nested photo to zoom it in the pane
-- Each QR URL is listed once (nested block wins; no second yellow banner)
-- Empty “no QR” / “no phone” rows are not drawn
-- Phone numbers from nested-EML text and inner images (OCR pack optional)
-- First wrapper also peeled on image-map `area href` (Symantec Click-time)
-
 ## What it does
 
 - Peels one wrapper on every `https` link in the displayed message

@@ -2,10 +2,15 @@
   if (!globalThis.WrapperUnwrap) return;
   const api = globalThis.browser || globalThis.messenger;
   let lastLink = null;
+  const qrShown = Object.create(null);
+
+  function clearQrShown() {
+    for (const k of Object.keys(qrShown)) delete qrShown[k];
+  }
 
   function rewriteAnchors(root) {
     if (!root || !root.querySelectorAll) return;
-    const links = root.querySelectorAll("a[href]");
+    const links = root.querySelectorAll("a[href], area[href]");
     for (const a of links) {
       const href = a.getAttribute("href");
       if (!href || href.startsWith("mailto:") || href.startsWith("#")) continue;
@@ -285,12 +290,12 @@
     return /^(https?:\/\/|www\.)/i.test(String(s || "").trim());
   }
 
-  function qrRow(payload, peeled) {
+  function qrRow(payload) {
     const row = document.createElement("div");
     row.className = "nest-qr";
     const lbl = document.createElement("div");
     lbl.className = "nest-qr-lbl";
-    lbl.textContent = peeled ? "QR URL (extracted, not peeled)" : "QR content (extracted, not peeled)";
+    lbl.textContent = "QR URL (extracted, not peeled)";
     row.appendChild(lbl);
     if (looksLikeUrl(payload)) {
       const href = /^https?:\/\//i.test(payload) ? payload : "http://" + payload;
@@ -309,29 +314,82 @@
     return row;
   }
 
+  function takeQr(payload) {
+    const key = String(payload || "").trim();
+    if (!key || qrShown[key]) return false;
+    qrShown[key] = true;
+    return true;
+  }
+
   async function fillQr(box, images) {
-    const seen = Object.create(null);
     for (const im of images || []) {
       if (!im.dataUrl) continue;
       const data = await decodeQr(im.dataUrl);
-      if (!data || seen[data]) continue;
-      seen[data] = true;
-      box.appendChild(qrRow(data, looksLikeUrl(data)));
+      if (!data || !takeQr(data)) continue;
+      box.appendChild(qrRow(data));
     }
-    if (!box.childElementCount) {
-      const empty = document.createElement("div");
-      empty.className = "nest-qr-lbl";
-      empty.textContent = images && images.length ? "No QR code decoded from inner images." : "";
-      if (empty.textContent) box.appendChild(empty);
+  }
+
+  function htmlToText(html) {
+    const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+    return (doc.body && doc.body.textContent) || "";
+  }
+
+  function phoneRow(num, source) {
+    const row = document.createElement("div");
+    row.className = "nest-phone";
+    const lbl = document.createElement("div");
+    lbl.className = "nest-phone-lbl";
+    lbl.textContent = source;
+    const val = document.createElement("div");
+    val.className = "nest-phone-num";
+    val.textContent = num;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Copy";
+    btn.addEventListener("click", function () {
+      copyText(num);
+    });
+    row.appendChild(lbl);
+    row.appendChild(val);
+    row.appendChild(btn);
+    return row;
+  }
+
+  async function fillPhones(box, msg) {
+    const apiPhones = globalThis.PeelPhones;
+    const extract = apiPhones && apiPhones.extractPhones ? apiPhones.extractPhones : function () { return []; };
+    const ocr = apiPhones && apiPhones.ocrDataUrl ? apiPhones.ocrDataUrl : function () { return Promise.resolve(""); };
+    const seen = Object.create(null);
+    function add(num, source) {
+      const key = String(num).replace(/\D/g, "");
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      box.appendChild(phoneRow(num, source));
+    }
+    const fromText = extract((msg.text || "") + "\n" + htmlToText(msg.html || ""));
+    for (const n of fromText) add(n, "Phone in nested message text");
+    for (const im of msg.images || []) {
+      if (!im.dataUrl) continue;
+      const raw = await ocr(im.dataUrl);
+      const found = extract(raw);
+      for (const n of found) add(n, "Phone in nested image" + (im.name ? " (" + im.name + ")" : ""));
     }
   }
 
   function showNested(messages) {
     const old = document.getElementById("wrapper-nested-eml");
     if (old) old.remove();
-    if (!messages || !messages.length) return;
+    const oldQr = document.getElementById("wrapper-qr-banner");
+    if (oldQr) oldQr.remove();
+    clearQrShown();
+    if (!messages || !messages.length) {
+      scanOuterQr();
+      return;
+    }
     const wrap = document.createElement("div");
     wrap.id = "wrapper-nested-eml";
+    const pending = [];
     messages.forEach(function (msg, idx) {
       const art = document.createElement("article");
       art.className = "nest-block";
@@ -348,62 +406,76 @@
         (msg.from || "(unknown)");
       const inner = document.createElement("div");
       inner.className = "nest-inner";
-      const body = document.createElement("iframe");
-      body.className = "nest-frame";
-      body.setAttribute("sandbox", "allow-popups allow-popups-to-escape-sandbox allow-same-origin");
-      body.setAttribute("referrerpolicy", "no-referrer");
-      const srcdoc = msg.html
-        ? sanitizeHtml(msg.html, msg.images)
-        : sanitizeHtml("<pre></pre>", []);
-      if (!msg.html && msg.text) {
-        const preDoc = new DOMParser().parseFromString("<pre></pre>", "text/html");
-        preDoc.querySelector("pre").textContent = msg.text;
-        body.srcdoc = sanitizeHtml(preDoc.body.innerHTML, []);
-      } else {
-        body.srcdoc = srcdoc;
+      const hasBody = !!(msg.html || msg.text);
+      if (hasBody) {
+        const body = document.createElement("iframe");
+        body.className = "nest-frame";
+        body.setAttribute("sandbox", "allow-popups allow-popups-to-escape-sandbox allow-same-origin");
+        body.setAttribute("referrerpolicy", "no-referrer");
+        if (!msg.html && msg.text) {
+          const preDoc = new DOMParser().parseFromString("<pre></pre>", "text/html");
+          preDoc.querySelector("pre").textContent = msg.text;
+          body.srcdoc = sanitizeHtml(preDoc.body.innerHTML, []);
+        } else {
+          body.srcdoc = sanitizeHtml(msg.html, msg.images);
+        }
+        body.addEventListener("load", function () {
+          try {
+            if (body.contentDocument) rewriteAnchors(body.contentDocument);
+          } catch (_) {}
+        });
+        inner.appendChild(body);
       }
-      body.addEventListener("load", function () {
-        try {
-          if (body.contentDocument) rewriteAnchors(body.contentDocument);
-        } catch (_) {}
-      });
       const media = document.createElement("div");
-      media.className = "nest-media";
+      media.className = "nest-media" + (hasBody ? "" : " nest-img-only");
       for (const im of msg.images || []) {
         if (!im.dataUrl) continue;
         const img = document.createElement("img");
         img.src = im.dataUrl;
         img.alt = im.name || "Inner image";
         img.className = "nest-img";
+        img.addEventListener("click", function () {
+          window.open(im.dataUrl, "_blank", "noopener,noreferrer");
+        });
         media.appendChild(img);
       }
+      if (media.childElementCount) inner.appendChild(media);
       const qrBox = document.createElement("div");
       qrBox.className = "nest-qr-box";
-      fillQr(qrBox, msg.images);
-      inner.appendChild(body);
-      if (media.childElementCount) inner.appendChild(media);
-      inner.appendChild(qrBox);
+      const phoneBox = document.createElement("div");
+      phoneBox.className = "nest-phone-box";
+      pending.push(
+        fillQr(qrBox, msg.images).then(function () {
+          if (qrBox.childElementCount) inner.appendChild(qrBox);
+        })
+      );
+      pending.push(
+        fillPhones(phoneBox, msg).then(function () {
+          if (phoneBox.childElementCount) inner.appendChild(phoneBox);
+        })
+      );
       art.appendChild(h);
       art.appendChild(who);
       art.appendChild(inner);
       wrap.appendChild(art);
     });
     insertBanner(wrap);
+    Promise.all(pending).then(function () {
+      scanOuterQr();
+    });
   }
 
   async function scanOuterQr() {
     const old = document.getElementById("wrapper-qr-banner");
     if (old) old.remove();
     const imgs = document.querySelectorAll("img");
-    const seen = Object.create(null);
     const found = [];
     for (const img of imgs) {
       if (img.closest("#wrapper-nested-eml")) continue;
       const src = img.currentSrc || img.src;
-      if (!src || src.indexOf("data:") !== 0 && src.indexOf("mailbox:") !== 0 && src.indexOf("cid:") !== 0 && src.indexOf("http") !== 0) continue;
+      if (!src || (src.indexOf("data:") !== 0 && src.indexOf("mailbox:") !== 0 && src.indexOf("cid:") !== 0 && src.indexOf("http") !== 0)) continue;
       const data = await decodeQr(src);
-      if (!data || seen[data]) continue;
-      seen[data] = true;
+      if (!data || !takeQr(data)) continue;
       found.push(data);
     }
     if (!found.length) return;
@@ -413,7 +485,7 @@
     title.className = "ics-title";
     title.textContent = "QR in this message (" + found.length + ") — extracted, not peeled";
     bar.appendChild(title);
-    for (const payload of found) bar.appendChild(qrRow(payload, looksLikeUrl(payload)));
+    for (const payload of found) bar.appendChild(qrRow(payload));
     insertBanner(bar);
   }
 
@@ -437,5 +509,7 @@
     }
   });
   mo.observe(document.documentElement || document.body, { childList: true, subtree: true });
-  setTimeout(scanOuterQr, 600);
+  setTimeout(function () {
+    if (!document.getElementById("wrapper-nested-eml")) scanOuterQr();
+  }, 800);
 })();

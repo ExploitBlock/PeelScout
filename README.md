@@ -24,6 +24,11 @@ Debug Add-ons → **Load Temporary Add-on…** → `manifest.json` from a source
 
 Requires Thunderbird 128+.
 
+## 1.7.3
+
+- Nested photos stay medium in the message list
+- Click-to-zoom fills most of the window so the receipt text is readable
+
 ## What it does
 
 - Peels one wrapper on every `https` link in the displayed message

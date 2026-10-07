@@ -3,6 +3,10 @@
   const api = globalThis.browser || globalThis.messenger;
   let lastLink = null;
   const qrShown = Object.create(null);
+  let pdfToken = null;
+  let pdfTokenKnown = false;
+  const pdfQueue = [];
+  let nestInners = [];
 
   function clearQrShown() {
     for (const k of Object.keys(qrShown)) delete qrShown[k];
@@ -290,12 +294,12 @@
     return /^(https?:\/\/|www\.)/i.test(String(s || "").trim());
   }
 
-  function qrRow(payload) {
+  function qrRow(payload, label) {
     const row = document.createElement("div");
     row.className = "nest-qr";
     const lbl = document.createElement("div");
     lbl.className = "nest-qr-lbl";
-    lbl.textContent = "QR URL (extracted, not peeled)";
+    lbl.textContent = label || "QR URL (extracted, not peeled)";
     row.appendChild(lbl);
     if (looksLikeUrl(payload)) {
       const href = /^https?:\/\//i.test(payload) ? payload : "http://" + payload;
@@ -432,7 +436,82 @@
     for (const n of telHits(msg.html)) add(n, "Phone in nested message text");
   }
 
-  function showNested(messages) {
+  function showPdf(msg) {
+    if (!pdfTokenKnown) {
+      pdfQueue.push(msg);
+      return;
+    }
+    if (!msg || msg.token !== pdfToken) return;
+    const section = document.createElement("section");
+    section.className = "nest-pdf";
+    const title = document.createElement("div");
+    title.className = "nest-pdf-title";
+    const shown = (msg.pages || []).length;
+    const total = msg.pageCount || 0;
+    let titleText = "PDF: " + (msg.name || "attachment.pdf");
+    if (total > shown) titleText += " — showing " + shown + " of " + total + " pages";
+    title.textContent = titleText;
+    section.appendChild(title);
+    if (msg.locked) {
+      const note = document.createElement("div");
+      note.className = "nest-pdf-note";
+      note.textContent = "Password-protected PDF, not previewed";
+      section.appendChild(note);
+    } else {
+      const media = document.createElement("div");
+      media.className = "nest-media";
+      for (const page of msg.pages || []) {
+        if (!page || !page.dataUrl) continue;
+        const img = document.createElement("img");
+        img.src = page.dataUrl;
+        img.alt = "PDF page " + (page.num || "");
+        img.className = "nest-img nest-img-photo";
+        img.addEventListener("click", function () {
+          showZoom(page.dataUrl);
+        });
+        media.appendChild(img);
+      }
+      if (media.childElementCount) section.appendChild(media);
+      const seen = Object.create(null);
+      for (const item of msg.qr || []) {
+        const payload = String((item && item.payload) || "");
+        if (!payload) continue;
+        seen[payload] = true;
+        if (!takeQr(payload)) continue;
+        section.appendChild(qrRow(payload, "QR URL in PDF, page " + item.page + " (extracted, not peeled)"));
+      }
+      for (const item of msg.links || []) {
+        const url = String((item && item.url) || "").trim();
+        if (!url || seen[url]) continue;
+        seen[url] = true;
+        section.appendChild(qrRow(url, "Link in PDF, page " + item.page + " (not peeled)"));
+      }
+    }
+    if (msg.nestedIndex >= 0) {
+      const inner = nestInners[msg.nestedIndex];
+      if (inner) inner.appendChild(section);
+      return;
+    }
+    let banner = document.getElementById("wrapper-pdf-banner");
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.id = "wrapper-pdf-banner";
+      insertBanner(banner);
+    }
+    banner.appendChild(section);
+  }
+
+  function flushPdfQueue() {
+    const queued = pdfQueue.splice(0, pdfQueue.length);
+    for (const item of queued) showPdf(item);
+  }
+
+  function showNested(messages, token) {
+    pdfToken = token;
+    pdfTokenKnown = true;
+    nestInners = [];
+    const oldPdf = document.getElementById("wrapper-pdf-banner");
+    if (oldPdf) oldPdf.remove();
     const old = document.getElementById("wrapper-nested-eml");
     if (old) old.remove();
     const oldQr = document.getElementById("wrapper-qr-banner");
@@ -440,6 +519,7 @@
     clearQrShown();
     if (!messages || !messages.length) {
       scanOuterQr();
+      flushPdfQueue();
       return;
     }
     const wrap = document.createElement("div");
@@ -460,6 +540,7 @@
         " · From: " +
         (msg.from || "(unknown)");
       const inner = document.createElement("div");
+      nestInners[idx] = inner;
       const hasBody = hasMeaningfulBody(msg);
       inner.className = "nest-inner" + (hasBody ? "" : " nest-tight");
       if (hasBody) {
@@ -521,6 +602,7 @@
       wrap.appendChild(art);
     });
     insertBanner(wrap);
+    flushPdfQueue();
     Promise.all(pending).then(function () {
       scanOuterQr();
     });
@@ -532,7 +614,7 @@
     const imgs = document.querySelectorAll("img");
     const found = [];
     for (const img of imgs) {
-      if (img.closest("#wrapper-nested-eml")) continue;
+      if (img.closest("#wrapper-nested-eml") || img.closest("#wrapper-pdf-banner")) continue;
       const src = img.currentSrc || img.src;
       if (!src || (src.indexOf("data:") !== 0 && src.indexOf("mailbox:") !== 0 && src.indexOf("cid:") !== 0 && src.indexOf("http") !== 0)) continue;
       const data = await decodeQr(src);
@@ -557,7 +639,8 @@
       if (msg.type === "wrapper-keep-unwrapping") showStepper(lastLink);
       if (msg.type === "wrapper-copy-original" && lastLink && lastLink.original) copyText(lastLink.original);
       if (msg.type === "ics-links") showIcsBanner(msg.urls || []);
-      if (msg.type === "nested-eml") showNested(msg.messages || []);
+      if (msg.type === "nested-eml") showNested(msg.messages || [], msg.token);
+      if (msg.type === "pdf-preview") showPdf(msg);
     });
   }
 

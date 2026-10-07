@@ -1,10 +1,10 @@
 # PeelScout
 
-Thunderbird add-on that removes the **first** email-security URL wrapper when you open a message, shows nested `.eml` content (and QR URLs), reads phone numbers from images inside that nested mail, and lists URLs hidden in calendar invites (`.ics`).
+Thunderbird add-on that removes the **first** email-security URL wrapper when you open a message, shows nested `.eml` content (and QR URLs), previews PDF attachments, reads phone numbers from images inside that nested mail, and lists URLs hidden in calendar invites (`.ics`).
 
 A normal click uses the inner URL. The stored `.eml` is not changed. PeelScout does not need internet to run.
 
-Not in this version: QR inside PDF attachments. Translator is not included. Phone OCR runs only on images that belong to a nested `.eml`, not on outer attachments.
+Translator is not included. Phone OCR runs only on images that belong to a nested `.eml`, not on outer attachments. Phone numbers are not taken from PDFs.
 
 ## Install in Thunderbird
 
@@ -39,6 +39,7 @@ Requires Thunderbird 128+.
 - QR codes in that inner (and outer) HTML are decoded; the URL is listed **raw** (not peeled)
 - Phone numbers in nested-EML HTML/text, and in nested-EML images (offline OCR), are listed to copy
 - If the message has `invite.ics` / `text/calendar`, a banner lists those URLs (AWS/S3 rows highlighted)
+- PDF attachments are previewed automatically (pages 1–2, plus any scanned page with a QR code, up to 4 images). QR codes and links inside the PDF are listed raw. Phone numbers are not taken from PDFs. Only the first 8 pages are scanned
 
 ## Vendors
 

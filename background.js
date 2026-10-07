@@ -155,11 +155,125 @@ async function collectNested(messageId) {
   return list.slice(0, 5);
 }
 
+let scanToken = 0;
+const tabTokens = new Map();
+
+function isPdfPart(name, contentType) {
+  const n = name || "";
+  const ct = (contentType || "").toLowerCase();
+  return ct.indexOf("application/pdf") === 0 || /\.pdf$/i.test(n);
+}
+
+function withoutPdfs(messages) {
+  const out = [];
+  for (const msg of messages) {
+    out.push({
+      filename: msg.filename || "",
+      subject: msg.subject || "",
+      from: msg.from || "",
+      html: msg.html || "",
+      text: msg.text || "",
+      images: msg.images || [],
+    });
+  }
+  return out;
+}
+
+async function collectOuterPdfs(messageId) {
+  const list = [];
+  const seen = Object.create(null);
+  async function add(partName, name, contentType) {
+    if (!partName || seen[partName]) return;
+    if (!isPdfPart(name, contentType)) return;
+    seen[partName] = true;
+    try {
+      const file = await messenger.messages.getAttachmentFile(messageId, partName);
+      const buf = await file.arrayBuffer();
+      if (buf.byteLength > 8000000) return;
+      list.push({
+        nestedIndex: -1,
+        name: name || "attachment.pdf",
+        size: buf.byteLength,
+        data: new Uint8Array(buf),
+      });
+    } catch (_) {}
+  }
+  try {
+    const atts = await messenger.messages.listAttachments(messageId);
+    for (const att of atts) await add(att.partName, att.name, att.contentType);
+  } catch (_) {}
+  try {
+    const full = await messenger.messages.getFull(messageId);
+    const parts = [];
+    walkParts(full, parts);
+    for (const part of parts) await add(part.partName, part.name || part.filename, part.contentType);
+  } catch (_) {}
+  return list;
+}
+
+async function scanMessagePdfs(tabId, token, nested, messageId) {
+  function stale() {
+    return tabTokens.get(tabId) !== token;
+  }
+  const jobs = [];
+  for (let i = 0; i < nested.length; i++) {
+    const pdfs = nested[i].pdfs || [];
+    for (const pdf of pdfs) {
+      if (!pdf || !pdf.bytes) continue;
+      jobs.push({
+        nestedIndex: i,
+        name: pdf.name || "attachment.pdf",
+        size: pdf.bytes.length,
+        bytes: pdf.bytes,
+      });
+    }
+  }
+  const outers = await collectOuterPdfs(messageId);
+  if (stale()) return;
+  for (const outer of outers) {
+    let dup = false;
+    for (const job of jobs) {
+      if (job.name === outer.name && job.size === outer.size) {
+        dup = true;
+        break;
+      }
+    }
+    if (!dup) jobs.push(outer);
+  }
+  const limited = jobs.slice(0, 3);
+  for (const job of limited) {
+    if (stale()) return;
+    let result = { pageCount: 0, pages: [], qr: [], links: [], locked: false };
+    try {
+      const data = job.data || Uint8Array.from(job.bytes, function (c) { return c.charCodeAt(0); });
+      result = await PeelPdf.scan(data);
+    } catch (_) {}
+    if (stale()) return;
+    await sendWithRetry(tabId, {
+      type: "pdf-preview",
+      token: token,
+      nestedIndex: job.nestedIndex,
+      name: job.name,
+      pageCount: result.pageCount || 0,
+      pages: result.pages || [],
+      qr: result.qr || [],
+      links: result.links || [],
+      locked: !!result.locked,
+    });
+  }
+}
+
 async function pushExtrasToTab(tabId, messageId) {
+  const token = ++scanToken;
+  tabTokens.set(tabId, token);
   const nested = await collectNested(messageId);
-  await sendWithRetry(tabId, { type: "nested-eml", messages: nested });
+  if (tabTokens.get(tabId) !== token) return;
+  await sendWithRetry(tabId, { type: "nested-eml", token: token, messages: withoutPdfs(nested) });
   const urls = await collectIcsUrls(messageId);
+  if (tabTokens.get(tabId) !== token) return;
   await sendWithRetry(tabId, { type: "ics-links", urls: urls });
+  if (tabTokens.get(tabId) !== token) return;
+  await scanMessagePdfs(tabId, token, nested, messageId);
 }
 
 if (messenger.messageDisplay && messenger.messageDisplay.onMessageDisplayed) {

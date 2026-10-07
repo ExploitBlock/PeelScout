@@ -157,7 +157,7 @@
   }
 
   function emptyMsg() {
-    return { subject: "", from: "", html: "", text: "", images: [], nested: [] };
+    return { subject: "", from: "", html: "", text: "", images: [], pdfs: [], nested: [] };
   }
 
   function parseMessage(raw, depth) {
@@ -202,6 +202,10 @@
         if (!msg.text) msg.text = decodeText(ent.bytes, ent.charset).slice(0, MAX_HTML);
       } else if (ct.indexOf("image/") === 0) {
         addImage(ent);
+      } else if (ct.indexOf("application/pdf") === 0 || /\.pdf$/i.test(ent.name || "")) {
+        if (ent.bytes && ent.bytes.length <= 8000000) {
+          msg.pdfs.push({ name: ent.name || "attachment.pdf", bytes: ent.bytes });
+        }
       }
     }
 
@@ -214,7 +218,7 @@
     var list = [];
     function push(m, name) {
       if (!m) return;
-      if (!m.html && !m.text && !(m.images && m.images.length)) {
+      if (!m.html && !m.text && !(m.images && m.images.length) && !(m.pdfs && m.pdfs.length)) {
         if (m.nested && m.nested.length) {
           for (var i = 0; i < m.nested.length; i++) push(m.nested[i], name);
         }
@@ -227,6 +231,7 @@
         html: m.html || "",
         text: m.text || "",
         images: m.images || [],
+        pdfs: m.pdfs || [],
       });
       if (m.nested) {
         for (var j = 0; j < m.nested.length; j++) push(m.nested[j], name);

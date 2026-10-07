@@ -337,6 +337,9 @@
 
   function htmlToText(html) {
     const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+    doc.querySelectorAll("style, script, head").forEach(function (el) {
+      el.remove();
+    });
     return (doc.body && doc.body.textContent) || "";
   }
 
@@ -396,10 +399,27 @@
     return row;
   }
 
+  function telHits(html) {
+    const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+    const hits = [];
+    doc.querySelectorAll("a[href]").forEach(function (a) {
+      const href = a.getAttribute("href") || "";
+      const tel = /^tel:([^?#;]*)/i.exec(href);
+      let num;
+      if (!tel) return;
+      num = tel[1].trim();
+      try {
+        num = decodeURIComponent(num);
+      } catch (_) {}
+      num = num.replace(/\s+/g, " ").trim();
+      if (num) hits.push(num);
+    });
+    return hits;
+  }
+
   async function fillPhones(box, msg) {
     const apiPhones = globalThis.PeelPhones;
     const extract = apiPhones && apiPhones.extractPhones ? apiPhones.extractPhones : function () { return []; };
-    const ocr = apiPhones && apiPhones.ocrDataUrl ? apiPhones.ocrDataUrl : function () { return Promise.resolve(""); };
     const seen = Object.create(null);
     function add(num, source) {
       const key = String(num).replace(/\D/g, "");
@@ -409,12 +429,7 @@
     }
     const fromText = extract((msg.text || "") + "\n" + htmlToText(msg.html || ""));
     for (const n of fromText) add(n, "Phone in nested message text");
-    for (const im of msg.images || []) {
-      if (!im.dataUrl) continue;
-      const raw = await ocr(im.dataUrl);
-      const found = extract(raw);
-      for (const n of found) add(n, "Phone in nested image" + (im.name ? " (" + im.name + ")" : ""));
-    }
+    for (const n of telHits(msg.html)) add(n, "Phone in nested message text");
   }
 
   function showNested(messages) {

@@ -11,9 +11,6 @@ async function injectIntoOpenTabs() {
       await messenger.tabs.executeScript(tab.id, { file: "unwrap.js" });
       await messenger.tabs.executeScript(tab.id, { file: "jsqr.min.js" });
       await messenger.tabs.executeScript(tab.id, { file: "phones.js" });
-      try {
-        await messenger.tabs.executeScript(tab.id, { file: "ocrad.js" });
-      } catch (_) {}
       await messenger.tabs.executeScript(tab.id, { file: "message-script.js" });
       await messenger.tabs.insertCSS(tab.id, { file: "message-style.css" });
     } catch (_) {}
@@ -90,12 +87,6 @@ async function sendWithRetry(tabId, payload) {
   }
 }
 
-async function injectOcrad(tabId) {
-  try {
-    await messenger.tabs.executeScript(tabId, { file: "ocrad.js" });
-  } catch (_) {}
-}
-
 async function collectIcsUrls(messageId) {
   const urls = [];
   const seen = Object.create(null);
@@ -165,7 +156,6 @@ async function collectNested(messageId) {
 }
 
 async function pushExtrasToTab(tabId, messageId) {
-  await injectOcrad(tabId);
   const nested = await collectNested(messageId);
   await sendWithRetry(tabId, { type: "nested-eml", messages: nested });
   const urls = await collectIcsUrls(messageId);

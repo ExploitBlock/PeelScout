@@ -13,7 +13,7 @@
   var pdfPromise = null;
 
   function emptyResult() {
-    return { pageCount: 0, pages: [], qr: [], links: [], locked: false };
+    return { pageCount: 0, pages: [], qr: [], links: [], locked: false, scanned: 0, scanLimit: 0 };
   }
 
   function loadPdfJs() {
@@ -65,7 +65,8 @@
     });
   }
 
-  function paintWhite(ctx, location, ox, oy) {
+  // Boxes are page-relative so the same code can be masked on every pass size.
+  function relativeBox(location, width, height) {
     var corners = [
       location.topLeftCorner,
       location.topRightCorner,
@@ -76,74 +77,141 @@
     var minY = Infinity;
     var maxX = -Infinity;
     var maxY = -Infinity;
-    for (var i = 0; i < corners.length; i++) {
-      var corner = corners[i];
+    var i;
+    var corner;
+    if (!width || !height) return null;
+    for (i = 0; i < corners.length; i++) {
+      corner = corners[i];
       if (!corner) continue;
-      var x = corner.x + ox;
-      var y = corner.y + oy;
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (x > maxX) maxX = x;
-      if (y > maxY) maxY = y;
+      if (corner.x < minX) minX = corner.x;
+      if (corner.y < minY) minY = corner.y;
+      if (corner.x > maxX) maxX = corner.x;
+      if (corner.y > maxY) maxY = corner.y;
     }
-    if (minX === Infinity) return;
-    var margin = 16;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(minX - margin, minY - margin, maxX - minX + margin * 2, maxY - minY + margin * 2);
+    if (minX === Infinity) return null;
+    return { x0: minX / width, y0: minY / height, x1: maxX / width, y1: maxY / height };
   }
 
-  function scanRegion(ctx, x, y, w, h, pageNum, qr, seen, deadline) {
-    if (w < 8 || h < 8) return 0;
+  // Masks decoded codes in the pixel copy, never on the canvas the preview is made from.
+  function whiteOut(image, box) {
+    var margin = Math.max(image.width, image.height) * 0.01;
+    var x0 = Math.max(0, Math.floor(box.x0 * image.width - margin));
+    var y0 = Math.max(0, Math.floor(box.y0 * image.height - margin));
+    var x1 = Math.min(image.width, Math.ceil(box.x1 * image.width + margin));
+    var y1 = Math.min(image.height, Math.ceil(box.y1 * image.height + margin));
+    var data;
+    var y;
+    var from;
+    if (x1 <= x0 || y1 <= y0) return;
+    data = image.data;
+    for (y = y0; y < y1; y++) {
+      from = (y * image.width + x0) * 4;
+      data.fill(255, from, from + (x1 - x0) * 4);
+    }
+  }
+
+  function paintKnown(image, known) {
+    var i;
+    for (i = 0; i < known.length; i++) whiteOut(image, known[i]);
+  }
+
+  // Returns false when the pass stops early. A finished pass with no further code returns true.
+  function readPass(image, pageNum, qr, seen, known, deadline, cancelled, inversion) {
     var fn = root.jsQR;
-    if (!fn) return 0;
     var hits = 0;
+    var code;
+    var payload;
+    var box;
+    if (!fn || !image) return false;
+    paintKnown(image, known);
     while (hits < MAX_CODES) {
-      if (Date.now() >= deadline) return hits;
-      var image;
+      if (Date.now() >= deadline || cancelled()) return false;
       try {
-        image = ctx.getImageData(x, y, w, h);
+        code = fn(image.data, image.width, image.height, { inversionAttempts: inversion });
       } catch (_) {
-        return hits;
+        return false;
       }
-      var code;
-      try {
-        code = fn(image.data, image.width, image.height);
-      } catch (_) {
-        return hits;
-      }
-      if (!code || !code.data) return hits;
-      var payload = String(code.data);
+      if (!code || !code.data) return true;
+      payload = String(code.data);
       if (!seen[payload]) {
         seen[payload] = true;
         qr.push({ page: pageNum, payload: payload });
       }
-      if (!code.location) return hits + 1;
-      paintWhite(ctx, code.location, x, y);
       hits++;
+      box = code.location ? relativeBox(code.location, image.width, image.height) : null;
+      if (!box) return true;
+      known.push(box);
+      whiteOut(image, box);
     }
-    return hits;
+    return true;
   }
 
-  function collectQr(canvas, pageNum, qr, seen, deadline) {
+  function scaledImage(canvas, longSide) {
+    var longer = Math.max(canvas.width, canvas.height) || 1;
+    if (longer <= longSide) return null;
+    var scale = longSide / longer;
+    var out = document.createElement("canvas");
+    out.width = Math.max(1, Math.round(canvas.width * scale));
+    out.height = Math.max(1, Math.round(canvas.height * scale));
+    var image = null;
+    try {
+      var ctx = out.getContext("2d");
+      ctx.drawImage(canvas, 0, 0, out.width, out.height);
+      image = ctx.getImageData(0, 0, out.width, out.height);
+    } catch (_) {}
+    out.width = 0;
+    out.height = 0;
+    return image;
+  }
+
+  function pause() {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, 0);
+    });
+  }
+
+  // Three sizes, every pass. A hit at 1100 px must not hide a smaller code.
+  async function collectQr(canvas, pageNum, qr, seen, deadline, cancelled) {
     var ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    var hits = scanRegion(ctx, 0, 0, canvas.width, canvas.height, pageNum, qr, seen, deadline);
-    if (hits > 0) return;
-    var tw = Math.floor(canvas.width / 2);
-    var th = Math.floor(canvas.height / 2);
-    if (tw < 8 || th < 8) return;
-    var xs = [0, Math.floor((canvas.width - tw) / 2), canvas.width - tw];
-    var ys = [0, Math.floor((canvas.height - th) / 2), canvas.height - th];
-    for (var yi = 0; yi < ys.length; yi++) {
-      for (var xi = 0; xi < xs.length; xi++) {
-        if (Date.now() >= deadline) return;
-        scanRegion(ctx, xs[xi], ys[yi], tw, th, pageNum, qr, seen, deadline);
+    var known = [];
+    var passes = [
+      { longSide: 1100, inversion: "attemptBoth" },
+      { longSide: 1600, inversion: "dontInvert" },
+      { longSide: 0, inversion: "dontInvert" },
+    ];
+    var i;
+    var pass;
+    var image;
+    var finished;
+    if (!ctx) return false;
+    if (canvas.width < 8 || canvas.height < 8) return true;
+    for (i = 0; i < passes.length; i++) {
+      if (Date.now() >= deadline || cancelled()) return false;
+      pass = passes[i];
+      image = null;
+      if (pass.longSide) {
+        image = scaledImage(canvas, pass.longSide);
+        if (!image) {
+          await pause();
+          continue;
+        }
+      } else {
+        try {
+          image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        } catch (_) {
+          return false;
+        }
       }
+      finished = readPass(image, pageNum, qr, seen, known, deadline, cancelled, pass.inversion);
+      image = null;
+      await pause();
+      if (!finished) return false;
     }
+    return true;
   }
 
-  async function collectLinks(page, pageNum, links, seen, deadline) {
-    var anns = await withBudget(page.getAnnotations(), deadline);
+  async function collectLinks(page, pageNum, links, seen) {
+    var anns = await page.getAnnotations();
     for (var i = 0; i < anns.length && links.length < MAX_LINKS; i++) {
       var ann = anns[i];
       if (!ann || ann.subtype !== "Link") continue;
@@ -198,7 +266,7 @@
     var pages = [];
     for (var j = 0; j < canvases.length && pages.length < MAX_PREVIEWS; j++) {
       var item = canvases[j];
-      if (item.num > 2 && !qrPage[item.num]) continue;
+      if (!qrPage[item.num]) continue;
       var dataUrl = toPreview(item.canvas);
       if (dataUrl) pages.push({ num: item.num, dataUrl: dataUrl });
     }
@@ -211,9 +279,10 @@
     return pages;
   }
 
-  async function scan(bytes) {
+  async function scan(bytes, opts) {
     var result = emptyResult();
     var loadingTask = null;
+    var cancelled = opts && typeof opts.cancelled === "function" ? opts.cancelled : function () { return false; };
     try {
       if (!bytes || !bytes.length || bytes.length > MAX_BYTES) return result;
       if (!hasPdfHeader(bytes)) return result;
@@ -238,21 +307,28 @@
       var seenLink = Object.create(null);
       var canvases = [];
       var limit = Math.min(MAX_PAGES, result.pageCount);
-      for (var n = 1; n <= limit; n++) {
-        if (Date.now() >= deadline) break;
-        var page = null;
+      var n;
+      var linkPage;
+      var page;
+      var canvas;
+      var done;
+      result.scanLimit = limit;
+      for (n = 1; n <= limit; n++) {
+        if (cancelled()) break;
+        if (result.links.length >= MAX_LINKS) break;
+        try {
+          linkPage = await doc.getPage(n);
+          await collectLinks(linkPage, n, result.links, seenLink);
+        } catch (_) {}
+      }
+      for (n = 1; n <= limit; n++) {
+        if (Date.now() >= deadline || cancelled()) break;
         try {
           page = await withBudget(doc.getPage(n), deadline);
-          var canvas = await renderPage(page, deadline);
-          collectQr(canvas, n, result.qr, seenQr, deadline);
+          canvas = await renderPage(page, deadline);
+          done = await collectQr(canvas, n, result.qr, seenQr, deadline, cancelled);
           canvases.push({ num: n, canvas: canvas });
-        } catch (err) {
-          if (err && err.message === "timeout") break;
-          continue;
-        }
-        if (result.links.length >= MAX_LINKS) continue;
-        try {
-          await collectLinks(page, n, result.links, seenLink, deadline);
+          if (done) result.scanned++;
         } catch (err) {
           if (err && err.message === "timeout") break;
         }

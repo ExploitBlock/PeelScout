@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "PeelScout",
-  "description": "Removes the first email-security URL wrapper, shows nested EML content and QR URLs, previews PDF attachments and lists QR codes and links inside them, extracts phone numbers from nested-EML images, and surfaces calendar-invite URLs.",
-  "version": "1.8.0",
+  "description": "Removes the first email-security URL wrapper, shows nested EML content and QR URLs, previews PDF attachments and lists QR codes and links inside them, and surfaces calendar-invite URLs.",
+  "version": "1.8.1",
   "author": "ExploitBlock",
   "browser_specific_settings": {
     "gecko": {
@@ -10,7 +10,7 @@
       "strict_min_version": "128.0"
     }
   },
-  "permissions": ["messagesRead", "messagesModify", "menus"],
+  "permissions": ["messagesRead", "messagesModify", "menus", "clipboardWrite"],
   "content_security_policy": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
   "background": {
     "scripts": ["ics.js", "nested.js", "jsqr.min.js", "pdfscan.js", "background.js"]

@@ -54,26 +54,24 @@ a.wrapper-unwrapped { text-decoration-style: dotted; }
 }
 #wrapper-nested-eml .nest-qr-box,
 #wrapper-qr-banner .nest-qr,
-#wrapper-pdf-banner .nest-qr,
-#wrapper-nested-eml .nest-phone-box {
+#wrapper-pdf-banner .nest-qr {
   margin-top: 8px;
 }
 #wrapper-nested-eml .nest-qr,
 #wrapper-qr-banner .nest-qr,
-#wrapper-pdf-banner .nest-qr,
-#wrapper-nested-eml .nest-phone {
+#wrapper-pdf-banner .nest-qr {
   background: #f8dcdc; border: 1px solid #d9a0a0; border-radius: 4px; padding: 8px 10px;
   word-break: break-all;
 }
 #wrapper-nested-eml .nest-qr-lbl,
 #wrapper-qr-banner .nest-qr-lbl,
-#wrapper-pdf-banner .nest-qr-lbl,
-#wrapper-nested-eml .nest-phone-lbl { font-size: 12px; color: #5c6774; margin-bottom: 4px; }
-#wrapper-nested-eml .nest-phone-num { font: 15px/1.4 monospace; color: #1c2430; }
+#wrapper-pdf-banner .nest-qr-lbl { font-size: 12px; color: #5c6774; margin-bottom: 4px; }
 #wrapper-nested-eml a, #wrapper-qr-banner a, #wrapper-pdf-banner a { color: #0b57d0; }
 .nest-pdf { margin-top: 8px; }
 .nest-pdf-title { font-weight: 700; }
 .nest-pdf-note { color: #5c6774; font-size: 12px; }
+.nest-pdf-shot { margin: 0; }
+.nest-pdf-page { margin-top: 4px; font-size: 12px; color: #5c6774; }
 #wrapper-unwrap-panel {
   position: fixed; inset: 0; z-index: 2147483646; background: rgba(16, 22, 30, 0.45);
   display: flex; align-items: flex-start; justify-content: center; padding: 24px 16px;

@@ -1,8 +1,12 @@
 (function () {
   if (!globalThis.WrapperUnwrap) return;
+  if (globalThis.__peelScoutMessageScript) return;
+  globalThis.__peelScoutMessageScript = true;
   const api = globalThis.browser || globalThis.messenger;
   let lastLink = null;
   const qrShown = Object.create(null);
+  let outerQrGen = 0;
+  let outerQrKeys = [];
   let pdfToken = null;
   let pdfTokenKnown = false;
   const pdfQueue = [];
@@ -10,6 +14,7 @@
 
   function clearQrShown() {
     for (const k of Object.keys(qrShown)) delete qrShown[k];
+    outerQrKeys = [];
   }
 
   function rewriteAnchors(root) {
@@ -37,18 +42,41 @@
     if (el) el.remove();
   }
 
-  function copyText(text) {
+  function copyLocal(text) {
     const ta = document.createElement("textarea");
     ta.value = text;
     ta.setAttribute("readonly", "");
     ta.style.position = "fixed";
     ta.style.left = "-9999px";
-    document.documentElement.appendChild(ta);
-    ta.select();
+    (document.body || document.documentElement).appendChild(ta);
+    let ok = false;
     try {
-      document.execCommand("copy");
+      ta.focus();
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      ok = !!document.execCommand("copy");
     } catch (_) {}
     ta.remove();
+    return ok;
+  }
+
+  function copyText(text) {
+    const value = String(text == null ? "" : text);
+    if (!api || !api.runtime || !api.runtime.sendMessage) return Promise.resolve(copyLocal(value));
+    let sent;
+    try {
+      sent = api.runtime.sendMessage({ type: "copy-text", text: value });
+    } catch (_) {
+      return Promise.resolve(copyLocal(value));
+    }
+    return Promise.resolve(sent).then(
+      function (ok) {
+        return ok === true || copyLocal(value);
+      },
+      function () {
+        return copyLocal(value);
+      }
+    );
   }
 
   function showOriginal(info) {
@@ -291,10 +319,12 @@
   }
 
   function looksLikeUrl(s) {
-    return /^(https?:\/\/|www\.)/i.test(String(s || "").trim());
+    const t = String(s || "").trim();
+    return /^(https?:\/\/|www\.)/i.test(t) || /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}(:\d+)?[/?#]/i.test(t);
   }
 
   function qrRow(payload, label) {
+    payload = String(payload || "").trim();
     const row = document.createElement("div");
     row.className = "nest-qr";
     const lbl = document.createElement("div");
@@ -382,60 +412,6 @@
     });
   }
 
-  function phoneRow(num, source) {
-    const row = document.createElement("div");
-    row.className = "nest-phone";
-    const lbl = document.createElement("div");
-    lbl.className = "nest-phone-lbl";
-    lbl.textContent = source;
-    const val = document.createElement("div");
-    val.className = "nest-phone-num";
-    val.textContent = num;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = "Copy";
-    btn.addEventListener("click", function () {
-      copyText(num);
-    });
-    row.appendChild(lbl);
-    row.appendChild(val);
-    row.appendChild(btn);
-    return row;
-  }
-
-  function telHits(html) {
-    const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
-    const hits = [];
-    doc.querySelectorAll("a[href]").forEach(function (a) {
-      const href = a.getAttribute("href") || "";
-      const tel = /^tel:([^?#;]*)/i.exec(href);
-      let num;
-      if (!tel) return;
-      num = tel[1].trim();
-      try {
-        num = decodeURIComponent(num);
-      } catch (_) {}
-      num = num.replace(/\s+/g, " ").trim();
-      if (num) hits.push(num);
-    });
-    return hits;
-  }
-
-  async function fillPhones(box, msg) {
-    const apiPhones = globalThis.PeelPhones;
-    const extract = apiPhones && apiPhones.extractPhones ? apiPhones.extractPhones : function () { return []; };
-    const seen = Object.create(null);
-    function add(num, source) {
-      const key = String(num).replace(/\D/g, "");
-      if (!key || seen[key]) return;
-      seen[key] = true;
-      box.appendChild(phoneRow(num, source));
-    }
-    const fromText = extract((msg.text || "") + "\n" + htmlToText(msg.html || ""));
-    for (const n of fromText) add(n, "Phone in nested message text");
-    for (const n of telHits(msg.html)) add(n, "Phone in nested message text");
-  }
-
   function showPdf(msg) {
     if (!pdfTokenKnown) {
       pdfQueue.push(msg);
@@ -446,11 +422,8 @@
     section.className = "nest-pdf";
     const title = document.createElement("div");
     title.className = "nest-pdf-title";
-    const shown = (msg.pages || []).length;
     const total = msg.pageCount || 0;
-    let titleText = "PDF: " + (msg.name || "attachment.pdf");
-    if (total > shown) titleText += " — showing " + shown + " of " + total + " pages";
-    title.textContent = titleText;
+    title.textContent = "PDF: " + (msg.name || "attachment.pdf");
     section.appendChild(title);
     if (msg.locked) {
       const note = document.createElement("div");
@@ -462,6 +435,8 @@
       media.className = "nest-media";
       for (const page of msg.pages || []) {
         if (!page || !page.dataUrl) continue;
+        const shot = document.createElement("figure");
+        shot.className = "nest-pdf-shot";
         const img = document.createElement("img");
         img.src = page.dataUrl;
         img.alt = "PDF page " + (page.num || "");
@@ -469,7 +444,12 @@
         img.addEventListener("click", function () {
           showZoom(page.dataUrl);
         });
-        media.appendChild(img);
+        shot.appendChild(img);
+        const cap = document.createElement("figcaption");
+        cap.className = "nest-pdf-page";
+        cap.textContent = total ? "Page " + page.num + " of " + total : "Page " + page.num;
+        shot.appendChild(cap);
+        media.appendChild(shot);
       }
       if (media.childElementCount) section.appendChild(media);
       const seen = Object.create(null);
@@ -485,6 +465,13 @@
         if (!url || seen[url]) continue;
         seen[url] = true;
         section.appendChild(qrRow(url, "Link in PDF, page " + item.page + " (not peeled)"));
+      }
+      if (msg.scanLimit > 0 && msg.scanned < msg.scanLimit) {
+        const note = document.createElement("div");
+        note.className = "nest-pdf-note";
+        note.textContent =
+          "QR scan covered " + (msg.scanned || 0) + " of " + msg.scanLimit + " pages (time limit)";
+        section.appendChild(note);
       }
     }
     if (msg.nestedIndex >= 0) {
@@ -514,8 +501,6 @@
     if (oldPdf) oldPdf.remove();
     const old = document.getElementById("wrapper-nested-eml");
     if (old) old.remove();
-    const oldQr = document.getElementById("wrapper-qr-banner");
-    if (oldQr) oldQr.remove();
     clearQrShown();
     if (!messages || !messages.length) {
       scanOuterQr();
@@ -584,16 +569,9 @@
       if (media.childElementCount) inner.appendChild(media);
       const qrBox = document.createElement("div");
       qrBox.className = "nest-qr-box";
-      const phoneBox = document.createElement("div");
-      phoneBox.className = "nest-phone-box";
       pending.push(
         fillQr(qrBox, msg.images, imgByUrl).then(function () {
           if (qrBox.childElementCount) inner.appendChild(qrBox);
-        })
-      );
-      pending.push(
-        fillPhones(phoneBox, msg).then(function () {
-          if (phoneBox.childElementCount) inner.appendChild(phoneBox);
         })
       );
       art.appendChild(h);
@@ -609,19 +587,37 @@
   }
 
   async function scanOuterQr() {
-    const old = document.getElementById("wrapper-qr-banner");
-    if (old) old.remove();
+    const gen = ++outerQrGen;
+    const mine = Object.create(null);
+    for (const key of outerQrKeys) mine[key] = true;
     const imgs = document.querySelectorAll("img");
     const found = [];
+    const localSeen = Object.create(null);
     for (const img of imgs) {
-      if (img.closest("#wrapper-nested-eml") || img.closest("#wrapper-pdf-banner")) continue;
+      if (gen !== outerQrGen) return;
+      if (img.closest("#wrapper-nested-eml") || img.closest("#wrapper-pdf-banner") || img.closest("#wrapper-qr-banner")) continue;
       const src = img.currentSrc || img.src;
       if (!src || (src.indexOf("data:") !== 0 && src.indexOf("mailbox:") !== 0 && src.indexOf("cid:") !== 0 && src.indexOf("http") !== 0)) continue;
       const data = await decodeQr(src);
-      if (!data || !takeQr(data)) continue;
-      found.push(data);
+      if (gen !== outerQrGen) return;
+      const key = String(data || "").trim();
+      if (!key || localSeen[key]) continue;
+      if (qrShown[key] && !mine[key]) continue;
+      localSeen[key] = true;
+      found.push(key);
     }
+    if (gen !== outerQrGen) return;
+    const old = document.getElementById("wrapper-qr-banner");
+    if (old) old.remove();
+    for (const key of Object.keys(mine)) {
+      if (!localSeen[key]) delete qrShown[key];
+    }
+    outerQrKeys = [];
     if (!found.length) return;
+    for (const payload of found) {
+      qrShown[payload] = true;
+      outerQrKeys.push(payload);
+    }
     const bar = document.createElement("div");
     bar.id = "wrapper-qr-banner";
     const title = document.createElement("div");

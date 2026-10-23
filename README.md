@@ -1,10 +1,8 @@
 # PeelScout
 
-Thunderbird add-on that removes the **first** email-security URL wrapper when you open a message, shows nested `.eml` content (and QR URLs), previews PDF attachments, reads phone numbers from images inside that nested mail, and lists URLs hidden in calendar invites (`.ics`).
+Thunderbird add-on that removes the **first** email-security URL wrapper when you open a message, shows nested `.eml` content (and QR URLs), previews PDF attachments, and lists URLs hidden in calendar invites (`.ics`).
 
 A normal click uses the inner URL. The stored `.eml` is not changed. PeelScout does not need internet to run.
-
-Translator is not included. Phone OCR runs only on images that belong to a nested `.eml`, not on outer attachments. Phone numbers are not taken from PDFs.
 
 ## Install in Thunderbird
 
@@ -24,11 +22,6 @@ Debug Add-ons → **Load Temporary Add-on…** → `manifest.json` from a source
 
 Requires Thunderbird 128+.
 
-## 1.7.3
-
-- Nested photos stay medium in the message list
-- Click-to-zoom fills most of the window so the receipt text is readable
-
 ## What it does
 
 - Peels one wrapper on every `https` link in the displayed message
@@ -37,9 +30,8 @@ Requires Thunderbird 128+.
 - If the message contains another `.eml` (`message/rfc822`), the inner subject, body, and images are shown automatically
 - Image-only nested mail skips the empty body box and shows the photo large enough to read
 - QR codes in that inner (and outer) HTML are decoded; the URL is listed **raw** (not peeled)
-- Phone numbers in nested-EML HTML/text, and in nested-EML images (offline OCR), are listed to copy
 - If the message has `invite.ics` / `text/calendar`, a banner lists those URLs (AWS/S3 rows highlighted)
-- PDF attachments are previewed automatically (pages 1–2, plus any scanned page with a QR code, up to 4 images). QR codes and links inside the PDF are listed raw. Phone numbers are not taken from PDFs. Only the first 8 pages are scanned
+- PDF attachments preview only the pages that contain a QR code, labeled with the page number (usually one image, up to 4). QR codes and links inside the PDF are listed raw. Only the first 8 pages are scanned
 
 ## Vendors
 

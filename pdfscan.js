@@ -18,12 +18,14 @@
 
   function loadPdfJs() {
     if (pdfPromise) return pdfPromise;
+    var workerUrl = messenger.runtime.getURL("pdfjs/pdf.worker.min.mjs");
     pdfPromise = import(messenger.runtime.getURL("pdfjs/pdf.min.mjs"))
       .then(function (lib) {
-        if (lib.GlobalWorkerOptions) {
-          lib.GlobalWorkerOptions.workerSrc = messenger.runtime.getURL("pdfjs/pdf.worker.min.mjs");
-        }
-        return lib;
+        if (lib.GlobalWorkerOptions) lib.GlobalWorkerOptions.workerSrc = workerUrl;
+        // Module Worker never becomes ready in the Thunderbird background, so import it here and parse on this page.
+        return import(workerUrl).then(function () {
+          return lib;
+        });
       })
       .catch(function (err) {
         pdfPromise = null;

@@ -172,6 +172,101 @@
     });
   }
 
+  function threshold(image) {
+    var data = image.data;
+    var i;
+    var v;
+    for (i = 0; i < data.length; i += 4) {
+      v = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8 < 128 ? 0 : 255;
+      data[i] = v;
+      data[i + 1] = v;
+      data[i + 2] = v;
+      data[i + 3] = 255;
+    }
+    return image;
+  }
+
+  // 0..2 are R, G, B. 3..5 are R-G, R-B, G-B. A hue pair shows up in one of these.
+  function colorValue(r, g, b, mode) {
+    if (mode === 0) return r;
+    if (mode === 1) return g;
+    if (mode === 2) return b;
+    if (mode === 3) return r - g;
+    if (mode === 4) return r - b;
+    return g - b;
+  }
+
+  function colorGray(image, mode) {
+    var src = image.data;
+    var data = new Uint8ClampedArray(src.length);
+    var i;
+    var v;
+    var min = 255;
+    var max = -255;
+    var span;
+    for (i = 0; i < src.length; i += 4) {
+      v = colorValue(src[i], src[i + 1], src[i + 2], mode);
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    span = max - min || 1;
+    for (i = 0; i < src.length; i += 4) {
+      v = ((colorValue(src[i], src[i + 1], src[i + 2], mode) - min) * 255 / span) | 0;
+      data[i] = data[i + 1] = data[i + 2] = v;
+      data[i + 3] = 255;
+    }
+    return { data: data, width: image.width, height: image.height };
+  }
+
+  async function scanColor(image, pageNum, qr, seen, deadline, cancelled) {
+    var before = qr.length;
+    var mode;
+    for (mode = 0; mode < 6 && qr.length === before; mode++) {
+      if (Date.now() >= deadline || cancelled()) return false;
+      readPass(colorGray(image, mode), pageNum, qr, seen, [], deadline, cancelled, "attemptBoth");
+      await pause();
+    }
+    return true;
+  }
+
+  // jsQR misses a small code on a full page. Half-page crops cover that.
+  async function scanTiles(ctx, width, height, pageNum, qr, seen, deadline, cancelled, color) {
+    var tw = Math.floor(width / 2);
+    var th = Math.floor(height / 2);
+    var xs;
+    var ys;
+    var yi;
+    var xi;
+    var image;
+    var finished;
+    var before = qr.length;
+    if (tw < 8 || th < 8) return true;
+    xs = [0, Math.floor((width - tw) / 2), width - tw];
+    ys = [0, Math.floor((height - th) / 2), height - th];
+    for (yi = 0; yi < ys.length; yi++) {
+      for (xi = 0; xi < xs.length; xi++) {
+        if (Date.now() >= deadline || cancelled()) return false;
+        try {
+          image = ctx.getImageData(xs[xi], ys[yi], tw, th);
+        } catch (_) {
+          return false;
+        }
+        if (color) {
+          // shortcut: stop at the first new code. A second colored code on this page needs an earlier pass.
+          if (!(await scanColor(image, pageNum, qr, seen, deadline, cancelled))) return false;
+          if (qr.length !== before) return true;
+        } else {
+          finished = readPass(image, pageNum, qr, seen, [], deadline, cancelled, "attemptBoth");
+          await pause();
+          if (Date.now() >= deadline || cancelled()) return false;
+          if (!finished) continue;
+        }
+        image = null;
+      }
+    }
+    return true;
+  }
+
   // Three sizes, every pass. A hit at 1100 px must not hide a smaller code.
   async function collectQr(canvas, pageNum, qr, seen, deadline, cancelled) {
     var ctx = canvas.getContext("2d");
@@ -185,8 +280,10 @@
     var pass;
     var image;
     var finished;
+    var before;
     if (!ctx) return false;
     if (canvas.width < 8 || canvas.height < 8) return true;
+    before = qr.length;
     for (i = 0; i < passes.length; i++) {
       if (Date.now() >= deadline || cancelled()) return false;
       pass = passes[i];
@@ -207,7 +304,36 @@
       finished = readPass(image, pageNum, qr, seen, known, deadline, cancelled, pass.inversion);
       image = null;
       await pause();
-      if (!finished) return false;
+      if (!finished && (Date.now() >= deadline || cancelled())) return false;
+    }
+    if (qr.length === before) {
+      if (!(await scanTiles(ctx, canvas.width, canvas.height, pageNum, qr, seen, deadline, cancelled))) return false;
+    }
+    if (qr.length === before) {
+      if (Date.now() >= deadline || cancelled()) return false;
+      try {
+        image = threshold(ctx.getImageData(0, 0, canvas.width, canvas.height));
+      } catch (_) {
+        return true;
+      }
+      readPass(image, pageNum, qr, seen, known, deadline, cancelled, "attemptBoth");
+      image = null;
+      await pause();
+    }
+    if (qr.length === before) {
+      if (Date.now() >= deadline || cancelled()) return false;
+      try {
+        image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      } catch (_) {
+        image = null;
+      }
+      if (image) {
+        if (!(await scanColor(image, pageNum, qr, seen, deadline, cancelled))) return false;
+        image = null;
+      }
+    }
+    if (qr.length === before) {
+      if (!(await scanTiles(ctx, canvas.width, canvas.height, pageNum, qr, seen, deadline, cancelled, true))) return false;
     }
     return true;
   }

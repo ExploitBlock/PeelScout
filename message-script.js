@@ -412,31 +412,87 @@
     });
   }
 
+  function pdfKey(msg) {
+    return String(msg.nestedIndex) + "\0" + (msg.name || "attachment.pdf");
+  }
+
+  function findPdfSection(parent, key) {
+    if (!parent) return null;
+    const kids = parent.children;
+    for (let i = 0; i < kids.length; i++) {
+      if (kids[i].getAttribute && kids[i].getAttribute("data-pdf-key") === key) return kids[i];
+    }
+    return null;
+  }
+
+  function pdfHasPayload(section, payload) {
+    const nodes = section.querySelectorAll(".nest-qr a, .nest-qr-text");
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].textContent.trim() === payload) return true;
+    }
+    return false;
+  }
+
   function showPdf(msg) {
     if (!pdfTokenKnown) {
       pdfQueue.push(msg);
       return;
     }
     if (!msg || msg.token !== pdfToken) return;
-    const section = document.createElement("section");
-    section.className = "nest-pdf";
-    const title = document.createElement("div");
-    title.className = "nest-pdf-title";
-    const total = msg.pageCount || 0;
-    title.textContent = "PDF: " + (msg.name || "attachment.pdf");
-    section.appendChild(title);
-    if (msg.locked) {
-      const note = document.createElement("div");
-      note.className = "nest-pdf-note";
-      note.textContent = "Password-protected PDF, not previewed";
-      section.appendChild(note);
+    const key = pdfKey(msg);
+    const phase = msg.phase || "done";
+    let parent;
+    if (msg.nestedIndex >= 0) {
+      parent = nestInners[msg.nestedIndex];
+      if (!parent) return;
     } else {
-      const media = document.createElement("div");
-      media.className = "nest-media";
-      for (const page of msg.pages || []) {
+      parent = document.getElementById("wrapper-pdf-banner");
+      if (!parent) {
+        parent = document.createElement("div");
+        parent.id = "wrapper-pdf-banner";
+        insertBanner(parent);
+      }
+    }
+    let section = findPdfSection(parent, key);
+    if (section && phase === "links" && section.getAttribute("data-pdf-phase") === "done") return;
+    if (!section) {
+      section = document.createElement("section");
+      section.className = "nest-pdf";
+      section.setAttribute("data-pdf-key", key);
+      const title = document.createElement("div");
+      title.className = "nest-pdf-title";
+      title.textContent = "PDF: " + (msg.name || "attachment.pdf");
+      section.appendChild(title);
+      parent.appendChild(section);
+    }
+    section.setAttribute("data-pdf-phase", phase);
+    if (msg.locked) {
+      if (!section.querySelector(".nest-pdf-note")) {
+        const note = document.createElement("div");
+        note.className = "nest-pdf-note";
+        note.textContent = "Password-protected PDF, not previewed";
+        section.appendChild(note);
+      }
+      return;
+    }
+    const total = msg.pageCount || 0;
+    const pages = msg.pages || [];
+    if (pages.length) {
+      let media = section.querySelector(".nest-media");
+      if (!media) {
+        media = document.createElement("div");
+        media.className = "nest-media";
+        const title = section.querySelector(".nest-pdf-title");
+        if (title && title.nextSibling) section.insertBefore(media, title.nextSibling);
+        else section.appendChild(media);
+      }
+      for (const page of pages) {
         if (!page || !page.dataUrl) continue;
+        const pageKey = String(page.num);
+        if (media.querySelector('[data-pdf-page="' + pageKey + '"]')) continue;
         const shot = document.createElement("figure");
         shot.className = "nest-pdf-shot";
+        shot.setAttribute("data-pdf-page", pageKey);
         const img = document.createElement("img");
         img.src = page.dataUrl;
         img.alt = "PDF page " + (page.num || "");
@@ -451,41 +507,28 @@
         shot.appendChild(cap);
         media.appendChild(shot);
       }
-      if (media.childElementCount) section.appendChild(media);
-      const seen = Object.create(null);
-      for (const item of msg.qr || []) {
-        const payload = String((item && item.payload) || "");
-        if (!payload) continue;
-        seen[payload] = true;
-        if (!takeQr(payload)) continue;
-        section.appendChild(qrRow(payload, "QR URL in PDF, page " + item.page + " (extracted, not peeled)"));
-      }
-      for (const item of msg.links || []) {
-        const url = String((item && item.url) || "").trim();
-        if (!url || seen[url]) continue;
-        seen[url] = true;
-        section.appendChild(qrRow(url, "Link in PDF, page " + item.page + " (not peeled)"));
-      }
-      if (msg.scanLimit > 0 && msg.scanned < msg.scanLimit) {
-        const note = document.createElement("div");
-        note.className = "nest-pdf-note";
-        note.textContent =
-          "QR scan covered " + (msg.scanned || 0) + " of " + msg.scanLimit + " pages (time limit)";
-        section.appendChild(note);
-      }
     }
-    if (msg.nestedIndex >= 0) {
-      const inner = nestInners[msg.nestedIndex];
-      if (inner) inner.appendChild(section);
-      return;
+    const seen = Object.create(null);
+    for (const item of msg.qr || []) {
+      const payload = String((item && item.payload) || "").trim();
+      if (!payload || seen[payload] || pdfHasPayload(section, payload)) continue;
+      seen[payload] = true;
+      if (!takeQr(payload)) continue;
+      section.appendChild(qrRow(payload, "QR URL in PDF, page " + item.page + " (extracted, not peeled)"));
     }
-    let banner = document.getElementById("wrapper-pdf-banner");
-    if (!banner) {
-      banner = document.createElement("div");
-      banner.id = "wrapper-pdf-banner";
-      insertBanner(banner);
+    for (const item of msg.links || []) {
+      const url = String((item && item.url) || "").trim();
+      if (!url || seen[url] || pdfHasPayload(section, url)) continue;
+      seen[url] = true;
+      section.appendChild(qrRow(url, "Link in PDF, page " + item.page + " (not peeled)"));
     }
-    banner.appendChild(section);
+    if (phase !== "links" && msg.scanLimit > 0 && msg.scanned < msg.scanLimit && !section.querySelector(".nest-pdf-limit")) {
+      const note = document.createElement("div");
+      note.className = "nest-pdf-note nest-pdf-limit";
+      note.textContent =
+        "QR scan covered " + (msg.scanned || 0) + " of " + msg.scanLimit + " pages (time limit)";
+      section.appendChild(note);
+    }
   }
 
   function flushPdfQueue() {

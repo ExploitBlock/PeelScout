@@ -248,17 +248,11 @@ async function scanMessagePdfs(tabId, token, nested, messageId) {
     }
     if (!dup) jobs.push(outer);
   }
-  const limited = jobs.slice(0, 3);
-  for (const job of limited) {
-    if (stale()) return;
-    let result = { pageCount: 0, pages: [], qr: [], links: [], locked: false, scanned: 0, scanLimit: 0 };
-    try {
-      const data = job.data || Uint8Array.from(job.bytes, function (c) { return c.charCodeAt(0); });
-      result = await PeelPdf.scan(data, { cancelled: stale });
-    } catch (_) {}
+  async function postPdf(job, result, phase) {
     if (stale()) return;
     await sendWithRetry(tabId, {
       type: "pdf-preview",
+      phase: phase,
       token: token,
       nestedIndex: job.nestedIndex,
       name: job.name,
@@ -268,8 +262,24 @@ async function scanMessagePdfs(tabId, token, nested, messageId) {
       links: result.links || [],
       locked: !!result.locked,
       scanned: result.scanned || 0,
-      scanLimit: result.scanLimit || 0,
+      scanLimit: phase === "links" ? 0 : result.scanLimit || 0,
     });
+  }
+  const limited = jobs.slice(0, 3);
+  for (const job of limited) {
+    if (stale()) return;
+    let result = { pageCount: 0, pages: [], qr: [], links: [], locked: false, scanned: 0, scanLimit: 0 };
+    try {
+      const data = job.data || Uint8Array.from(job.bytes, function (c) { return c.charCodeAt(0); });
+      result = await PeelPdf.scan(data, {
+        cancelled: stale,
+        onProgress: function (partial) {
+          return postPdf(job, partial, "links");
+        },
+      });
+    } catch (_) {}
+    if (stale()) return;
+    await postPdf(job, result, "done");
   }
 }
 

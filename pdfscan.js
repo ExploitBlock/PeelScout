@@ -218,12 +218,30 @@
     return { data: data, width: image.width, height: image.height };
   }
 
+  function invertImage(image) {
+    var src = image.data;
+    var data = new Uint8ClampedArray(src.length);
+    var i;
+    for (i = 0; i < src.length; i += 4) {
+      data[i] = 255 - src[i];
+      data[i + 1] = 255 - src[i + 1];
+      data[i + 2] = 255 - src[i + 2];
+      data[i + 3] = 255;
+    }
+    return { data: data, width: image.width, height: image.height };
+  }
+
   async function scanColor(image, pageNum, qr, seen, deadline, cancelled) {
     var before = qr.length;
     var mode;
+    var gray;
     for (mode = 0; mode < 6 && qr.length === before; mode++) {
       if (Date.now() >= deadline || cancelled()) return false;
-      readPass(colorGray(image, mode), pageNum, qr, seen, [], deadline, cancelled, "attemptBoth");
+      gray = colorGray(image, mode);
+      readPass(gray, pageNum, qr, seen, [], deadline, cancelled, "attemptBoth");
+      if (qr.length !== before) break;
+      if (Date.now() >= deadline || cancelled()) return false;
+      readPass(invertImage(gray), pageNum, qr, seen, [], deadline, cancelled, "dontInvert");
       await pause();
     }
     return true;
@@ -268,7 +286,7 @@
   }
 
   // Three sizes, every pass. A hit at 1100 px must not hide a smaller code.
-  async function collectQr(canvas, pageNum, qr, seen, deadline, cancelled) {
+  async function collectQr(canvas, pageNum, qr, seen, deadline, cancelled, notify) {
     var ctx = canvas.getContext("2d");
     var known = [];
     var passes = [
@@ -281,9 +299,11 @@
     var image;
     var finished;
     var before;
+    var mark;
     if (!ctx) return false;
     if (canvas.width < 8 || canvas.height < 8) return true;
     before = qr.length;
+    mark = before;
     for (i = 0; i < passes.length; i++) {
       if (Date.now() >= deadline || cancelled()) return false;
       pass = passes[i];
@@ -302,8 +322,15 @@
         }
       }
       finished = readPass(image, pageNum, qr, seen, known, deadline, cancelled, pass.inversion);
+      if ((pass.longSide === 1100 || pass.longSide === 0) && qr.length === before && image) {
+        if (!(await scanColor(image, pageNum, qr, seen, deadline, cancelled))) return false;
+      }
       image = null;
       await pause();
+      if (notify && qr.length !== mark) {
+        mark = qr.length;
+        await notify();
+      }
       if (!finished && (Date.now() >= deadline || cancelled())) return false;
     }
     if (qr.length === before) {
@@ -321,20 +348,9 @@
       await pause();
     }
     if (qr.length === before) {
-      if (Date.now() >= deadline || cancelled()) return false;
-      try {
-        image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      } catch (_) {
-        image = null;
-      }
-      if (image) {
-        if (!(await scanColor(image, pageNum, qr, seen, deadline, cancelled))) return false;
-        image = null;
-      }
-    }
-    if (qr.length === before) {
       if (!(await scanTiles(ctx, canvas.width, canvas.height, pageNum, qr, seen, deadline, cancelled, true))) return false;
     }
+    if (notify && qr.length !== mark) await notify();
     return true;
   }
 
@@ -411,6 +427,22 @@
     var result = emptyResult();
     var loadingTask = null;
     var cancelled = opts && typeof opts.cancelled === "function" ? opts.cancelled : function () { return false; };
+    var onProgress = opts && typeof opts.onProgress === "function" ? opts.onProgress : null;
+    async function notify() {
+      if (!onProgress || cancelled()) return;
+      if (!result.links.length && !result.qr.length) return;
+      try {
+        await onProgress({
+          pageCount: result.pageCount,
+          pages: [],
+          qr: result.qr.slice(),
+          links: result.links.slice(),
+          locked: false,
+          scanned: result.scanned,
+          scanLimit: 0,
+        });
+      } catch (_) {}
+    }
     try {
       if (!bytes || !bytes.length || bytes.length > MAX_BYTES) return result;
       if (!hasPdfHeader(bytes)) return result;
@@ -449,12 +481,13 @@
           await collectLinks(linkPage, n, result.links, seenLink);
         } catch (_) {}
       }
+      await notify();
       for (n = 1; n <= limit; n++) {
         if (Date.now() >= deadline || cancelled()) break;
         try {
           page = await withBudget(doc.getPage(n), deadline);
           canvas = await renderPage(page, deadline);
-          done = await collectQr(canvas, n, result.qr, seenQr, deadline, cancelled);
+          done = await collectQr(canvas, n, result.qr, seenQr, deadline, cancelled, notify);
           canvases.push({ num: n, canvas: canvas });
           if (done) result.scanned++;
         } catch (err) {
